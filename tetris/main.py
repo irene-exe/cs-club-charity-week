@@ -59,6 +59,12 @@ class Tetromino:
             self.shape = [list(row) for row in zip(*self.shape[::-1])]
         else:
             self.shape = [list(row) for row in zip(*self.shape)][::-1]
+        if len(self.shape[0]) == 1 and len(self.shape) == 4:
+            self.x += 1
+            self.y -= 1
+        elif len(self.shape[0]) == 4 and len(self.shape) == 1:
+            self.x -= 1
+            self.y += 1
 
 class TetrisGame:
     def __init__(self):
@@ -207,15 +213,19 @@ def main():
                 elif state == "TITLE" and event.key == pygame.K_SPACE: state = "PLAYING"
                 elif state == "PLAYING":
                     if (event.key == pygame.K_LEFT or event.key == pygame.K_a) and game.valid_move(game.current_piece, -1, 0): game.current_piece.x -= 1
-                    if (event.key == pygame.K_RIGHT or event.key == pygame.K_d) and game.valid_move(game.current_piece, 1, 0): game.current_piece.x += 1
-                    if event.key == pygame.K_SPACE:
+                    elif (event.key == pygame.K_RIGHT or event.key == pygame.K_d) and game.valid_move(game.current_piece, 1, 0): game.current_piece.x += 1
+                    elif event.key == pygame.K_SPACE:
                         game.latency = max(0, game.latency - game.latency_reduction); game.score += game.pts_save
                         while game.valid_move(game.current_piece, 0, 1): game.current_piece.y += 1
                         game.lock_piece()
-                    if event.key == pygame.K_UP:
+                    elif event.key == pygame.K_k:
                         game.current_piece.rotate()
                         if not game.valid_move(game.current_piece, 0, 0): 
                             for _ in range(3): game.current_piece.rotate()
+                    elif event.key == pygame.K_j:
+                        game.current_piece.rotate(right=False)
+                        if not game.valid_move(game.current_piece, 0, 0): 
+                            for _ in range(3): game.current_piece.rotate(right=False)
                             
             if event.type == pygame.KEYUP:
                     if event.key == pygame.K_DOWN:
