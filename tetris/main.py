@@ -4,6 +4,9 @@ import random
 import time
 import threading
 
+import os
+os.environ['SDL_VIDEO_CENTERED'] = '1'
+
 try:
     import serial
 except ImportError:
