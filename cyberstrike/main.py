@@ -2,6 +2,16 @@ import pygame
 import random
 import math
 import sys
+import time
+import threading
+
+import os
+os.environ['SDL_VIDEO_CENTERED'] = '1'
+
+try:
+    import serial
+except ImportError:
+    serial = None
 
 # --- 1. SETTINGS ---
 WIDTH, HEIGHT = 1080, 725    
@@ -19,6 +29,16 @@ small_font = pygame.font.SysFont("monospace", 18, bold=True)
 font_sub = pygame.font.SysFont("monospace", 22, bold=True)
 large_font = pygame.font.SysFont("monospace", 50, bold=True)
 console_font = pygame.font.SysFont("monospace", 18)
+
+CONTROLLER_PORT = 'COM3'
+CONTROLLER_BAUD = 115200
+CONTROLLER_LEFT_THRESHOLD = 700
+CONTROLLER_RIGHT_THRESHOLD = 300
+CONTROLLER_UP_THRESHOLD = 300
+CONTROLLER_DOWN_THRESHOLD = 700
+
+controller_state = {"J1X": 512, "J1Y": 512, "J1SW": 1, "B1": 1}
+controller_stop_event = threading.Event()
 
 # --- 2. ASSET LOADING ---
 def load_s(path, size):
@@ -87,6 +107,34 @@ def draw_glitch(img, intensity=0.05, alpha=255):
             sy, sh = random.randint(0, HEIGHT), random.randint(5, 20)
             pygame.draw.rect(screen, random.choice([MAGENTA, BLACK, (0,0,50)]), (0, sy, WIDTH, sh))
 
+def read_arduino_controller():
+    if serial is None:
+        return
+
+    while not controller_stop_event.is_set():
+        try:
+            with serial.Serial(CONTROLLER_PORT, CONTROLLER_BAUD, timeout=1) as ser:
+                while not controller_stop_event.is_set():
+                    raw = ser.readline()
+                    if not raw:
+                        continue
+                    try:
+                        line = raw.decode('utf-8').strip()
+                    except Exception:
+                        continue
+                    parts = line.split(',')
+                    for p in parts:
+                        if '=' in p:
+                            key, value = p.split('=', 1)
+                            if key in controller_state:
+                                try:
+                                    controller_state[key] = int(value)
+                                except ValueError:
+                                    pass
+        except Exception:
+            time.sleep(1)
+
+
 def reset_game():
     # Tell Python we want to change the variables defined outside this function
     global player_pos, score, start_time, bullets, enemies, total_shots
@@ -118,9 +166,24 @@ def main():
     global screen, clock, font, small_font, large_font, console_font, s_player, s_core, s_zigzag, s_pointer, s_teleporter, font_sub
     global game_state, player_pos, player_speed, score, start_time, bullets, enemies, total_shots, last_shot_time, reload_threshold, base_fire_delay, grid_scroll, can_shoot_manual, space_enabled
     global show_console, console_input, admin_log, rig_percent, global_velocity, spawn_rates, last_spawn_times, restart_btn, quit_btn
+    global controller_state, controller_b1_prev
+
+    controller_b1_prev = 1
+    if serial is not None:
+        threading.Thread(target=read_arduino_controller, daemon=True).start()
+
     while running:
         screen.fill(BLACK) 
         current_ticks = pygame.time.get_ticks()
+        ctrl_x = controller_state.get("J1X", 512)
+        ctrl_y = controller_state.get("J1Y", 512)
+        b1 = controller_state.get("B1", 1)
+        controller_left = ctrl_x > CONTROLLER_LEFT_THRESHOLD
+        controller_right = ctrl_x < CONTROLLER_RIGHT_THRESHOLD
+        controller_up = ctrl_y < CONTROLLER_UP_THRESHOLD
+        controller_down = ctrl_y > CONTROLLER_DOWN_THRESHOLD
+        controller_space = (b1 == 0)
+        controller_space_pressed = controller_space and controller_b1_prev == 1
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -212,7 +275,11 @@ def main():
             
             if space_enabled:
                 sub = font.render("[PRESS SPACE TO BEGIN]", True, WHITE)
-                screen.blit(sub, sub.get_rect(center=(WIDTH//2, HEIGHT-60)))
+                screen.blit(sub, sub.get_rect(center=(WIDTH//2, HEIGHT//2 - 60)))
+                if controller_space:
+                    game_state, start_time = "PLAYING", current_ticks
+                    enemies, bullets, score, total_shots = [], [], 0, 0
+                    last_spawn_times = {k: current_ticks for k in spawn_rates}
                 
         elif game_state == "PLAYING":
             elapsed = (current_ticks - start_time) // 1000
@@ -261,19 +328,26 @@ def main():
 
             # Player Controls
             if not show_console:
+                if controller_space_pressed:
+                    can_shoot_manual = True
+
                 keys = pygame.key.get_pressed()
-                if keys[pygame.K_a] and player_pos[0] > 30: player_pos[0] -= player_speed
-                if keys[pygame.K_d] and player_pos[0] < WIDTH-30: player_pos[0] += player_speed
-                if keys[pygame.K_w] and player_pos[1] > 30: player_pos[1] -= player_speed
-                if keys[pygame.K_s] and player_pos[1] < HEIGHT-30: player_pos[1] += player_speed
+                if (keys[pygame.K_a] or controller_left) and player_pos[0] > 30:
+                    player_pos[0] -= player_speed
+                if (keys[pygame.K_d] or controller_right) and player_pos[0] < WIDTH-30:
+                    player_pos[0] += player_speed
+                if (keys[pygame.K_w] or controller_up) and player_pos[1] > 30:
+                    player_pos[1] -= player_speed
+                if (keys[pygame.K_s] or controller_down) and player_pos[1] < HEIGHT-30:
+                    player_pos[1] += player_speed
                 
                 # Fire delay only really gets bad if rigged
                 fire_delay = base_fire_delay + ((reloads * 300) * ramp * rig_factor)
-                if keys[pygame.K_SPACE] and current_ticks - last_shot_time > fire_delay:
+                if (keys[pygame.K_SPACE] or controller_space) and current_ticks - last_shot_time > fire_delay:
                     if not force_semi or (force_semi and can_shoot_manual):
                         bullets.append([player_pos[0], player_pos[1]])
                         total_shots += 1; last_shot_time = current_ticks; can_shoot_manual = False
-                if not keys[pygame.K_SPACE] and total_shots > 0: total_shots -= 0.08
+                if not keys[pygame.K_SPACE] and not controller_space and total_shots > 0: total_shots -= 0.08
 
             # Spawning Logic
             for tier, ms in spawn_rates.items():
@@ -379,4 +453,5 @@ def main():
                 screen.blit(console_font.render(f"> {log}", True, MAGENTA), (20, HEIGHT - 225 + (i*24)))
             screen.blit(console_font.render(f"CMD: {console_input}_", True, WHITE), (20, HEIGHT - 35))
 
+        controller_b1_prev = b1
         pygame.display.flip(); clock.tick(FPS)
