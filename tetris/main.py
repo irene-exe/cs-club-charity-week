@@ -1,255 +1,426 @@
 import pygame
-import os
 import sys
-import importlib
+import random
+import time
+import threading
 
-# Initialize Pygame
+try:
+    import serial
+except ImportError:
+    serial = None
+
+# --- 1. CONFIGURATION ---
+WIDTH, HEIGHT = 1080, 725
+GRID_SIZE = 30
+COLUMNS, ROWS = 10, 20
+GAME_WIDTH, GAME_HEIGHT = COLUMNS * GRID_SIZE, ROWS * GRID_SIZE
+OFFSET_X, OFFSET_Y = (WIDTH - GAME_WIDTH) // 2, 50
+
+# Colors
+BLACK = (2, 2, 8); CYAN = (0, 255, 255); MAGENTA = (255, 0, 255)
+WHITE = (220, 220, 255); RED = (255, 50, 50); GRAY = (40, 40, 60)
+DARK_BLUE = (10, 10, 45); GRID_BLUE = (0, 0, 120)
+
+SHAPES = [
+    [[1, 1, 1, 1]], [[1, 1], [1, 1]], [[0, 1, 0], [1, 1, 1]],
+    [[0, 1, 1], [1, 1, 0]], [[1, 1, 0], [0, 1, 1]],
+    [[1, 0, 0], [1, 1, 1]], [[0, 0, 1], [1, 1, 1]]
+]
+
 pygame.init()
-
-# Constants
-WIDTH, HEIGHT = 800, 600
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GRAY = (200, 200, 200)
-DARK_GRAY = (150, 150, 150)
-BLUE = (50, 150, 255)
-RED = (200, 50, 50)
-
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Game Launcher")
-font = pygame.font.SysFont("Arial", 24)
-title_font = pygame.font.SysFont("Arial", 50, bold=True)
+pygame.display.set_caption("TETRIS: NO HESITATION - ROOT ACCESS")
+clock = pygame.time.Clock()
+font_main = pygame.font.SysFont("monospace", 45, bold=True)
+font_sub = pygame.font.SysFont("monospace", 22, bold=True)
+console_font = pygame.font.SysFont("monospace", 14)
+restart_btn = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 + 60, 240, 50)
+quit_btn    = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 + 130, 240, 50)
 
-class Launcher:
-    def __init__(self):
-        self.state = "INPUT"
-        self.fields = {
-            "First Name (Optional)": "",
-            "Last Name (Optional)": "",
-            "Student Number": ""
-        }
-        self.active_field = "First Name (Optional)"
-        
-        self.games = [
-            {"name": "CyberStrike", "folder": "cyberstrike", "file": "main"},
-            {"name": "Rhythm 5000", "folder": "rhythm", "file": "main"},
-            {"name": "Classic Tetris", "folder": "tetris", "file": "main"}
-        ]
-        self.current_idx = 0
+# --- 2. RENDERER ---
+def draw_4d_block(surface, x, y, size, color, is_fracture=False, expiry_time=0):
+    now = pygame.time.get_ticks()
+    fill_surf = pygame.Surface((size - 4, size - 4))
+    alpha = 160
+    if is_fracture:
+        time_left = expiry_time - now
+        alpha = 255 if time_left < 2000 and (now // 100) % 2 else 120
+    fill_surf.set_alpha(alpha); fill_surf.fill(color)
+    surface.blit(fill_surf, (x + 2, y + 2))
+    pygame.draw.rect(surface, color, (x + 2, y + 2, size - 4, size - 4), 2)
+    p, i_s = size // 4, size // 2
+    pygame.draw.rect(surface, color, (x + p, y + p, i_s, i_s), 1)
+    for s_pt, e_pt in [((x+2,y+2),(x+p,y+p)), ((x+size-2,y+2),(x+p+i_s,y+p)),
+                       ((x+2,y+size-2),(x+p,y+p+i_s)), ((x+size-2,y+size-2),(x+p+i_s,y+p+i_s))]:
+        pygame.draw.line(surface, color, s_pt, e_pt, 1)
 
-    def save_user(self):
-        filename = "log.txt"
-        header = "Student Login, Name, Points\n"
-        sn = self.fields["Student Number"].strip()
-        fn = self.fields["First Name (Optional)"].strip() or "N/A"
-        ln = self.fields["Last Name (Optional)"].strip() or "N/A"
-        full_name = f"{fn} {ln}"
+# --- 3. CORE LOGIC ---
+CONTROLLER_PORT = 'COM3'
+CONTROLLER_BAUD = 115200
+CONTROLLER_LEFT_THRESHOLD = 700
+CONTROLLER_RIGHT_THRESHOLD = 300
+CONTROLLER_DOWN_THRESHOLD = 700
+CONTROLLER_MOVE_DELAY = 120
 
-        # 1. Check if file exists and read it
-        if os.path.exists(filename):
-            with open(filename, "r") as f:
-                lines = f.readlines()
+controller_state = {"J1X": 512, "J1Y": 512, "J1SW": 1, "B1": 1, "B2": 1, "B3": 1}
+controller_stop_event = threading.Event()
+
+
+def read_arduino_controller():
+    if serial is None:
+        return
+
+    while not controller_stop_event.is_set():
+        try:
+            with serial.Serial(CONTROLLER_PORT, CONTROLLER_BAUD, timeout=1) as ser:
+                while not controller_stop_event.is_set():
+                    raw = ser.readline()
+                    if not raw:
+                        continue
+                    try:
+                        line = raw.decode('utf-8').strip()
+                    except Exception:
+                        continue
+                    parts = line.split(',')
+                    for p in parts:
+                        if '=' in p:
+                            key, value = p.split('=', 1)
+                            if key in controller_state:
+                                try:
+                                    controller_state[key] = int(value)
+                                except ValueError:
+                                    pass
+        except Exception:
+            time.sleep(1)
+
+
+class Tetromino:
+    def __init__(self, shape, f_chance):
+        self.shape = shape
+        self.is_fracture = random.random() < f_chance
+        self.color = RED if self.is_fracture else random.choice([CYAN, MAGENTA])
+        self.x, self.y = COLUMNS // 2 - len(shape[0]) // 2, 0
+    def rotate(self, right=True):
+        if right == True:
+            self.shape = [list(row) for row in zip(*self.shape[::-1])]
         else:
-            lines = [header]
+            self.shape = [list(row) for row in zip(*self.shape)][::-1]
+        if len(self.shape[0]) == 1 and len(self.shape) == 4:
+            self.x += 1
+            self.y -= 1
+        elif len(self.shape[0]) == 4 and len(self.shape) == 1:
+            self.x -= 1
+            self.y += 1
 
-        # 2. Check if the Student Number already exists
-        user_exists = False
-        for line in lines:
-            if line.startswith(f"{sn},"):
-                user_exists = True
-                break
+class TetrisGame:
+    def __init__(self):
+        self.grid = [[None for _ in range(COLUMNS)] for _ in range(ROWS)]
+        self.fracture_timers = {}
+        # RESET DEFAULT ADMIN VALUES
+        self.fracture_chance = 0.20
+        self.fracture_duration = 7000
+        self.base_speed = 900.0 
+        self.speed_decay = 0.8
+        self.pts_row = 4.0
+        self.pts_save = 0.2
+        self.latency_gain = 0.03
+        self.latency_reduction = 12.0
         
-        # 3. If the user is new, append them with 0 points
-        if not user_exists:
-            with open(filename, "a") as f:
-                # Format: Student Login, Name, Points
-                f.write(f"{sn}, {full_name}, 0\n")
+        self.score, self.latency = 0.0, 0
+        self.last_speed_bump = pygame.time.get_ticks()
+        self.last_drop_time = pygame.time.get_ticks()
+        self.speed_level = 0
+        self.game_over = False
+        self.queue = [self.new_piece() for _ in range(3)]
+        self.current_piece = self.queue.pop(0)
 
-    def draw_button(self, text, rect, color):
-        pygame.draw.rect(screen, color, rect, border_radius=8)
-        txt_surface = font.render(text, True, WHITE)
-        txt_rect = txt_surface.get_rect(center=rect.center)
-        screen.blit(txt_surface, txt_rect)
-        
-    def record_score(self, score=0):
-        print("FUN")
-        filename = "log.txt"
-        header = "Student Login, Name, Points\n"
-        
-        # 1. Read existing data
-        lines = []
-        if os.path.exists(filename):
-            with open(filename, "r") as f:
-                lines = f.readlines()
-        
-        # Ensure header exists if file was empty
-        if not lines:
-            lines = [header]
+    def generate_junk(self):
+        # Restored 20% height junk profile
+        for y in range(ROWS - 6, ROWS):
+            hole = random.randint(0, COLUMNS - 1)
+            for x in range(COLUMNS):
+                if x != hole: 
+                    self.grid[y][x] = {"color": random.choice([CYAN, MAGENTA, GRAY]), "fracture": False}
 
-        # 2. Prepare user info
-        student_id = self.fields["Student Number"].strip()
-        first_name = self.fields["First Name (Optional)"].strip() or "N/A"
-        last_name = self.fields["Last Name (Optional)"].strip() or "N/A"
-        full_name = f"{first_name} {last_name}"
-        
-        user_found = False
-        updated_lines = [lines[0]] # Keep the header
+    def new_piece(self): 
+        p = Tetromino(random.choice(SHAPES), self.fracture_chance)
+        for _ in range(random.randint(0, 3)): p.rotate()
+        p.x = COLUMNS // 2 - len(p.shape[0]) // 2
+        p.y = 0
+        return p
+    
+    def valid_move(self, piece, dx, dy):
+        for y, row in enumerate(piece.shape):
+            for x, cell in enumerate(row):
+                if cell:
+                    nx, ny = piece.x + x + dx, piece.y + y + dy
+                    if not (0 <= nx < COLUMNS and 0 <= ny < ROWS) or (ny >= 0 and self.grid[ny][nx]):
+                        return False
+        return True
 
-        # 3. Search and Update
-        for line in lines[1:]: # Skip header
-            if line.strip():
-                parts = line.strip().split(", ")
-                if len(parts) >= 3:
-                    current_id = parts[0]
-                    current_name = parts[1]
-                    current_points = float(parts[2])
-                    
-                    if current_id == student_id:
-                        # Update existing user points
-                        new_points = current_points + float(score)
-                        updated_lines.append(f"{student_id}, {current_name}, {new_points}\n")
-                        user_found = True
-                    else:
-                        updated_lines.append(line)
+    def lock_piece(self):
+        now = pygame.time.get_ticks()
+        for y, row in enumerate(self.current_piece.shape):
+            for x, cell in enumerate(row):
+                if cell:
+                    gy, gx = self.current_piece.y + y, self.current_piece.x + x
+                    self.grid[gy][gx] = {"color": self.current_piece.color, "fracture": self.current_piece.is_fracture}
+                    if self.current_piece.is_fracture: self.fracture_timers[(gy, gx)] = now + self.fracture_duration
+        self.clear_lines()
+        self.current_piece = self.queue.pop(0); self.queue.append(self.new_piece())
+        if not self.valid_move(self.current_piece, 0, 0): self.game_over = True
 
-        # 4. If new user, add them to the list
-        if not user_found:
-            print("DNE")
-            updated_lines.append(f"{student_id}, {full_name}, {float(score)}\n")
+    def clear_lines(self):
+        cleared = 0
+        for y in range(ROWS):
+            if all(self.grid[y]):
+                for k in [k for k in self.fracture_timers if k[0] == y]: del self.fracture_timers[k]
+                del self.grid[y]; self.grid.insert(0, [None for _ in range(COLUMNS)])
+                nt = {}
+                for (ty, tx), time in self.fracture_timers.items():
+                    nt[(ty + 1, tx) if ty < y else (ty, tx)] = time
+                self.fracture_timers = nt; cleared += 1
+        if cleared:
+            combo = {1: self.pts_row, 2: self.pts_row*2.5, 3: self.pts_row*4.5, 4: self.pts_row*7.5}
+            self.score += combo.get(cleared, cleared * self.pts_row)
+            self.latency = min(100, self.latency + (cleared * 10))
 
-        # 5. Write back to file
-        with open(filename, "w") as f:
-            print("\n".join(updated_lines))
-            f.write("\n".join(updated_lines))
-            
-    def run(self):
-        clock = pygame.time.Clock()
-        
-        while True:
-            screen.fill(WHITE)
-            mx, my = pygame.mouse.get_pos()
-            
-            # Check if Student Number is provided
-            id_provided = len(self.fields["Student Number"].strip()) > 0
+    def update(self):
+        if self.game_over: return
+        now = pygame.time.get_ticks()
+        for pos in [p for p, t in self.fracture_timers.items() if now > t]:
+            self.grid[pos[0]][pos[1]] = None; del self.fracture_timers[pos]
+        if now - self.last_speed_bump > 2500:
+            self.base_speed = max(300, self.base_speed - 50 * self.speed_decay)
+            self.speed_level += 1
+            self.last_speed_bump = now
+        self.latency = min(100, self.latency + self.latency_gain)
+        delay = self.base_speed - (self.latency * 3)
+        delay += (self.latency ** 2) * 0.02
 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    sys.exit()
+        # soft drop (↓ key)
+        if down_pressed:
+            delay *= 0.2   # 5x faster (tune this)
+        if now - self.last_drop_time > delay:
+            if self.valid_move(self.current_piece, 0, 1): self.current_piece.y += 1
+            else: self.lock_piece()
+            self.last_drop_time = now
+ 
+# --- 4. ENGINE ---
+game = TetrisGame(); state = "TITLE"
+show_console, console_input = False, ""
+admin_log = ["--- SYSTEM OVERRIDE ACTIVE ---", "USE '|' TO HARD REBOOT"]
+running = True
+down_pressed = False
+keyboard_down_pressed = False
+controller_move_timer = 0
+controller_hard_drop_prev = False
+controller_b1_prev = 1
+controller_b2_prev = 1
+controller_b3_prev = 1
 
-                if self.state == "INPUT":
-                    if event.type == pygame.MOUSEBUTTONDOWN:
-                        # Field selection detection
-                        if 250 < mx < 550:
-                            if 150 < my < 190: self.active_field = "First Name (Optional)"
-                            if 230 < my < 270: self.active_field = "Last Name (Optional)"
-                            if 310 < my < 350: self.active_field = "Student Number"
-                    
-                    if event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_TAB:
-                            order = ["First Name (Optional)", "Last Name (Optional)", "Student Number"]
-                            idx = (order.index(self.active_field) + 1) % len(order)
-                            self.active_field = order[idx]
-                        
-                        elif event.key == pygame.K_RETURN:
-                            # CRITICAL CHANGE: Only student number is required
-                            if id_provided:
-                                self.save_user()
-                                self.state = "SCROLLER"
-                        
-                        elif event.key == pygame.K_BACKSPACE:
-                            self.fields[self.active_field] = self.fields[self.active_field][:-1]
-                        else:
-                            if len(self.fields[self.active_field]) < 18:
-                                self.fields[self.active_field] += event.unicode
+def main():
+    global state, running
+    global game, show_console, console_input, admin_log, down_pressed, keyboard_down_pressed, WIDTH, HEIGHT, GRID_SIZE, COLUMNS, ROWS, GAME_WIDTH, GAME_HEIGHT, OFFSET_X, OFFSET_Y
+    global BLACK, WHITE, CYAN, MAGENTA, WHITE, RED, GRAY, DARK_BLUE, GRID_BLUE
+    global SHAPES, screen, clock, font_main, font_sub, console_font, restart_btn, quit_btn
+    global controller_move_timer, controller_hard_drop_prev, controller_b1_prev, controller_b2_prev, controller_b3_prev
 
-                elif self.state == "SCROLLER":
-                    if event.type == pygame.MOUSEBUTTONDOWN:
-                        # Arrow logic
-                        if 50 < mx < 100 and 275 < my < 325:
-                            self.current_idx = (self.current_idx - 1) % len(self.games)
-                        if 700 < mx < 750 and 275 < my < 325:
-                            self.current_idx = (self.current_idx + 1) % len(self.games)
-                        
-                        # Play logic
-                        if 300 < mx < 500 and 450 < my < 510:
-                            game = self.games[self.current_idx]
-                            original_dir = os.getcwd() # Save current folder
+    if serial is not None:
+        threading.Thread(target=read_arduino_controller, daemon=True).start()
+
+    while running:
+        screen.fill(BLACK); now = pygame.time.get_ticks()
+        ctrl_x = controller_state.get("J1X", 512)
+        ctrl_y = controller_state.get("J1Y", 512)
+        b1 = controller_state.get("B1", 1)
+        b2 = controller_state.get("B2", 1)
+        b3 = controller_state.get("B3", 1)
+        controller_left = ctrl_x > CONTROLLER_LEFT_THRESHOLD
+        controller_right = ctrl_x < CONTROLLER_RIGHT_THRESHOLD
+        controller_down = ctrl_y > CONTROLLER_DOWN_THRESHOLD
+        controller_b1_pressed = (b1 == 0)
+        controller_b2_pressed = (b2 == 0)
+        controller_b3_pressed = (b3 == 0)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_BACKQUOTE:
+                    show_console = not show_console
+                    continue
+                if event.key == pygame.K_DOWN:
+                    keyboard_down_pressed = True
+                # HIDDEN HARD REBOOT
+                if event.unicode == "|": 
+                    state = "TITLE"; game.__init__(); admin_log.append("HARD REBOOT EXECUTED")
+                    continue
+                if show_console:
+                    if event.key == pygame.K_RETURN:
+                        p = console_input.lower().split()
+                        if p:
+                            cmd = p[0]
                             try:
-                                # 1. Change directory to the game's folder
-                                os.chdir(game["folder"])
-                                
-                                # 2. Import the main file from that folder
-                                # We use '.' to refer to the current directory we just entered
-                                sys.path.insert(0, os.getcwd())
-                                mod = importlib.import_module(game["file"])
-                                importlib.reload(mod)
-                                
-                                # 3. Assuming your games have a main() function
-                                score = 0
-                                if hasattr(mod, 'main'):
-                                    score = mod.main()
-                                os.chdir(original_dir)
-                                print(score)
-                                self.record_score(score)
-                                
-                            except Exception as e:
-                                print(f"Error launching {game['name']}: {e}")
-                            finally:
-                                # 4. Always switch back to the launcher folder
-                                os.chdir(original_dir)
-                                if os.getcwd() in sys.path:
-                                    sys.path.remove(os.getcwd())
-                                pygame.display.set_mode((WIDTH, HEIGHT))
+                                if cmd == "help": 
+                                    admin_log.extend([
+                                        "spawn [0-100]  : Fracture chance %",
+                                        "speed [ms]     : Initial fall delay",
+                                        "rate [0.0-1.0] : Gravity decay per 5s",
+                                        "row_pts [val]  : Points per row",
+                                        "save_pts [val] : Points per hard drop",
+                                        "lat_inc [val]  : Passive heat gain",
+                                        "lat_dec [val]  : Heat removed on slam",
+                                        "fr_time [ms]   : Fracture lifetime"
+                                    ])
+                                elif cmd == "spawn": game.fracture_chance = int(p[1])/100.0; admin_log.append(f"SPAWN: {p[1]}%")
+                                elif cmd == "speed": game.base_speed = float(p[1]); admin_log.append(f"SPEED: {p[1]}ms")
+                                elif cmd == "rate": game.speed_decay = float(p[1]); admin_log.append(f"RATE: {p[1]}")
+                                elif cmd == "row_pts": game.pts_row = float(p[1]); admin_log.append(f"ROW: {p[1]}pts")
+                                elif cmd == "save_pts": game.pts_save = float(p[1]); admin_log.append(f"SAVE: {p[1]}pts")
+                                elif cmd == "lat_inc": game.latency_gain = float(p[1]); admin_log.append(f"LAT+: {p[1]}")
+                                elif cmd == "lat_dec": game.latency_reduction = float(p[1]); admin_log.append(f"LAT-: {p[1]}")
+                                elif cmd == "fr_time": game.fracture_duration = int(p[1]); admin_log.append(f"FRAC: {p[1]}ms")
+                                else: admin_log.append(f"ERR: {cmd} NOT FOUND")
+                            except: admin_log.append("ERR: PARAM INVALID")
+                        console_input = ""
+                    elif event.key == pygame.K_BACKSPACE:
+                        console_input = console_input[:-1]
+                    else:
+                        console_input += event.unicode
+                    continue
+                if state == "TITLE" and event.key == pygame.K_SPACE:
+                    state = "PLAYING"
+                elif state == "PLAYING":
+                    if (event.key == pygame.K_LEFT or event.key == pygame.K_a) and game.valid_move(game.current_piece, -1, 0): game.current_piece.x -= 1
+                    elif (event.key == pygame.K_RIGHT or event.key == pygame.K_d) and game.valid_move(game.current_piece, 1, 0): game.current_piece.x += 1
+                    elif event.key == pygame.K_SPACE:
+                        game.latency = max(0, game.latency - game.latency_reduction); game.score += game.pts_save
+                        while game.valid_move(game.current_piece, 0, 1): game.current_piece.y += 1
+                        game.lock_piece()
+                    elif event.key == pygame.K_k:
+                        game.current_piece.rotate()
+                        if not game.valid_move(game.current_piece, 0, 0): 
+                            for _ in range(3): game.current_piece.rotate()
+                    elif event.key == pygame.K_j:
+                        game.current_piece.rotate(right=False)
+                        if not game.valid_move(game.current_piece, 0, 0): 
+                            for _ in range(3): game.current_piece.rotate(right=False)
                             
-                        # Logout logic
-                        if 680 < mx < 780 and 20 < my < 60:
-                            self.fields = {k: "" for k in self.fields}
-                            self.state = "INPUT"
+            if event.type == pygame.KEYUP:
+                    if event.key == pygame.K_DOWN:
+                        keyboard_down_pressed = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if state == "GAME_OVER":
+                    if restart_btn.collidepoint(event.pos):
+                        game = TetrisGame()   # full reset
+                        state = "PLAYING"
 
-            # --- Rendering Input Screen ---
-            if self.state == "INPUT":
-                instruct = font.render("Enter details (Only ID is required):", True, BLACK)
-                screen.blit(instruct, (WIDTH//2 - instruct.get_width()//2, 80))
+                    if quit_btn.collidepoint(event.pos):
+                        running = False
+                        return round(game.score,2)
                 
-                y_pos = 150
-                for label, value in self.fields.items():
-                    lbl_surf = font.render(label, True, BLACK)
-                    screen.blit(lbl_surf, (250, y_pos - 25))
-                    
-                    box_rect = pygame.Rect(250, y_pos, 300, 40)
-                    # Use RED border if ID is empty and active, otherwise BLUE/GRAY
-                    border_col = BLUE if self.active_field == label else GRAY
-                    pygame.draw.rect(screen, border_col, box_rect, 2, border_radius=5)
-                    
-                    val_surf = font.render(value, True, BLACK)
-                    screen.blit(val_surf, (box_rect.x + 10, box_rect.y + 5))
-                    y_pos += 80
-                
-                # Dynamic Button Message
-                msg = "Press ENTER to Continue" if id_provided else "Enter ID to Start"
-                btn_col = BLUE if id_provided else GRAY
-                self.draw_button(msg, pygame.Rect(250, 420, 300, 50), btn_col)
 
-            # --- Rendering Scroller ---
-            elif self.state == "SCROLLER":
-                self.draw_button("Logout", pygame.Rect(680, 20, 100, 40), RED)
-                
-                # Show name if provided, otherwise show ID
-                display_name = self.fields["First Name (Optional)"].strip() or f"ID: {self.fields['Student Number']}"
-                welcome = font.render(f"Welcome, {display_name}", True, DARK_GRAY)
-                screen.blit(welcome, (20, 20))
+        if state == "PLAYING" and not show_console:
+            if controller_left or controller_right:
+                if now - controller_move_timer >= CONTROLLER_MOVE_DELAY:
+                    if controller_left and game.valid_move(game.current_piece, -1, 0):
+                        game.current_piece.x -= 1
+                    elif controller_right and game.valid_move(game.current_piece, 1, 0):
+                        game.current_piece.x += 1
+                    controller_move_timer = now
 
-                title = title_font.render(self.games[self.current_idx]["name"], True, BLACK)
-                screen.blit(title, (WIDTH//2 - title.get_width()//2, 250))
-                
-                self.draw_button("<", pygame.Rect(50, 275, 50, 50), BLUE)
-                self.draw_button(">", pygame.Rect(700, 275, 50, 50), BLUE)
-                self.draw_button("PLAY", pygame.Rect(300, 450, 200, 60), BLUE)
+            down_pressed = controller_down or keyboard_down_pressed
 
-            pygame.display.flip()
-            clock.tick(60)
+            if controller_b3_pressed and controller_b3_prev != 0:
+                game.latency = max(0, game.latency - game.latency_reduction)
+                game.score += game.pts_save
+                while game.valid_move(game.current_piece, 0, 1):
+                    game.current_piece.y += 1
+                game.lock_piece()
 
-if __name__ == "__main__":
-    launcher = Launcher()
-    launcher.run()
+            if controller_b1_pressed and controller_b1_prev != 0:
+                game.current_piece.rotate(right=False)
+                if not game.valid_move(game.current_piece, 0, 0):
+                    for _ in range(3):
+                        game.current_piece.rotate(right=False)
+
+            if controller_b2_pressed and controller_b2_prev != 0:
+                game.current_piece.rotate()
+                if not game.valid_move(game.current_piece, 0, 0):
+                    for _ in range(3):
+                        game.current_piece.rotate()
+
+            controller_hard_drop_prev = controller_down
+            controller_b1_prev = b1
+            controller_b2_prev = b2
+            controller_b3_prev = b3
+
+        if state == "TITLE":
+            t1 = font_main.render("TETRIS: NO HESITATION", True, CYAN)
+            t2 = font_sub.render("SUB_ROUTINE: DEEP_STATE", True, MAGENTA)
+            screen.blit(t1, (WIDTH//2 - t1.get_width()//2, HEIGHT//2 - 50))
+            if (now // 500) % 2:
+                t3 = font_sub.render("[ PRESS SPACE TO START ]", True, WHITE)
+                screen.blit(t3, (WIDTH//2 - t3.get_width()//2, HEIGHT//2 + 50))
+        elif state == "PLAYING":
+            if not show_console: game.update()
+            pygame.draw.rect(screen, DARK_BLUE, (OFFSET_X-5, OFFSET_Y-5, GAME_WIDTH+10, GAME_HEIGHT+10), 3)
+            for i, p_next in enumerate(game.queue):
+                for y, row in enumerate(p_next.shape):
+                    for x, cell in enumerate(row):
+                        if cell: draw_4d_block(screen, OFFSET_X+GAME_WIDTH+60+x*20, OFFSET_Y+400+i*80+y*20, 20, p_next.color, p_next.is_fracture, 0)
+            for y, row in enumerate(game.grid):
+                for x, cell in enumerate(row):
+                    if cell: draw_4d_block(screen, OFFSET_X+x*GRID_SIZE, OFFSET_Y+y*GRID_SIZE, GRID_SIZE, cell["color"], cell["fracture"], game.fracture_timers.get((y,x),0))
+            p = game.current_piece
+            ghost = Tetromino(p.shape, 0)
+            ghost.shape = p.shape
+            ghost.x = p.x
+            ghost.y = p.y
+            while game.valid_move(ghost, 0, 1):
+                ghost.y += 1
+            for y, row in enumerate(ghost.shape):
+                for x, cell in enumerate(row):
+                    if cell:
+                        gx = OFFSET_X + (ghost.x + x) * GRID_SIZE
+                        gy = OFFSET_Y + (ghost.y + y) * GRID_SIZE
+                        pygame.draw.rect(screen, WHITE, (gx, gy, GRID_SIZE, GRID_SIZE), 3)
+            for y, row in enumerate(p.shape):
+                for x, cell in enumerate(row):
+                    if cell: draw_4d_block(screen, OFFSET_X+(p.x+x)*GRID_SIZE, OFFSET_Y+(p.y+y)*GRID_SIZE, GRID_SIZE, p.color, p.is_fracture)
+            bar_x = OFFSET_X + GAME_WIDTH + 40
+            pygame.draw.rect(screen, DARK_BLUE, (bar_x, OFFSET_Y, 20, 300), 2)
+            f = (game.latency / 100) * 300; lc = RED if game.latency > 80 else CYAN
+            pygame.draw.rect(screen, lc, (bar_x, OFFSET_Y+300-f, 20, f))
+            screen.blit(font_sub.render(f"POINTS: {game.score:.1f}", True, WHITE), (OFFSET_X - 180, OFFSET_Y))
+            sw = (now - game.last_speed_bump > 4000); lvc = RED if sw and (now // 100) % 2 else MAGENTA
+            screen.blit(font_sub.render(f"LVL: {game.speed_level}", True, lvc), (OFFSET_X - 180, OFFSET_Y + 40))
+            if game.game_over: state = "GAME_OVER"
+        elif state == "GAME_OVER":
+            ov = font_main.render("SYSTEM FAILURE", True, RED)
+            sc = font_sub.render(f"FINAL POINTS: {game.score:.1f}", True, WHITE)
+
+            screen.blit(ov, (WIDTH//2 - ov.get_width()//2, HEIGHT//2 - 100))
+            screen.blit(sc, (WIDTH//2 - sc.get_width()//2, HEIGHT//2 - 40))
+            
+            mouse_pos = pygame.mouse.get_pos()
+
+            restart_color = (0, 200, 200) if restart_btn.collidepoint(mouse_pos) else CYAN
+            quit_color    = (200, 0, 0) if quit_btn.collidepoint(mouse_pos) else RED
+
+            # --- Restart Button ---
+            pygame.draw.rect(screen, restart_color, restart_btn, border_radius=8)
+            r_text = font_sub.render("RESTART", True, BLACK)
+            screen.blit(r_text, r_text.get_rect(center=restart_btn.center))
+
+            # --- Quit Button ---
+            pygame.draw.rect(screen, quit_color, quit_btn, border_radius=8)
+            q_text = font_sub.render("RECORD", True, BLACK)
+            screen.blit(q_text, q_text.get_rect(center=quit_btn.center))
+        if show_console:
+            s = pygame.Surface((WIDTH, 260), pygame.SRCALPHA); s.fill((2, 2, 8, 245)); screen.blit(s, (0, HEIGHT-260))
+            pygame.draw.line(screen, MAGENTA, (0, HEIGHT-260), (WIDTH, HEIGHT-260), 2)
+            for i, log in enumerate(admin_log[-10:]): screen.blit(console_font.render(f"> {log}", True, MAGENTA), (20, HEIGHT-245 + i*20))
+            screen.blit(console_font.render(f"root@system:~# {console_input}|", True, WHITE), (20, HEIGHT-35))
+
+        pygame.display.flip(); clock.tick(60)
+        
