@@ -18,15 +18,32 @@ START_SPEED = 6
 MAX_SPEED = 16
 MAX_Y_SPEED = 8
 ACCEL = 1.4
-WINNING_SCORE = 7
+WINNING_SCORE = 1
 
 def main():
     pygame.init()
+    pygame.font.init()
+    
+    def reset_game():
+        nonlocal score1, score2, ball_dx, ball_dy, game_over, reset_timer, is_initial_start
+        score1, score2 = 0, 0
+        ball.center = (WIDTH//2, HEIGHT//2)
+        ball_dx, ball_dy = 0, 0
+        game_over = False
+        reset_timer = 180
+        is_initial_start = True
+    
+    button_font = pygame.font.SysFont("monospace", 40, bold=True)
+
+    restart_btn = pygame.Rect(WIDTH//2 - 170, HEIGHT//2, 180, 70)
+    quit_btn    = pygame.Rect(WIDTH//2 + 30,  HEIGHT//2, 140, 70)
+    
+    
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Two-Player Pong")
     
     # Use a pixel-style system font
-    font = pygame.font.SysFont("Consolas", 60, bold=True)
+    font = pygame.font.SysFont("monospace", 60, bold=True)
     clock = pygame.time.Clock()
 
     # 2. Game Objects
@@ -46,11 +63,19 @@ def main():
     reset_timer = 180 
     is_initial_start = True
 
-    while True:
+
+    running = True
+    while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+
+            if event.type == pygame.MOUSEBUTTONDOWN and game_over:
+                if restart_btn.collidepoint(event.pos):
+                    reset_game()
+                elif quit_btn.collidepoint(event.pos):
+                    return 75
 
         # 1. Paddle Movement (Always active)
         keys = pygame.key.get_pressed()
@@ -130,10 +155,42 @@ def main():
             screen.blit(txt, (WIDTH//2 - txt.get_width()//2, HEIGHT//2 - 50))
 
         if game_over:
+            screen.fill((0,0,0))
             win_msg = "P1 WINS" if score1 >= WINNING_SCORE else "P2 WINS"
             win_surf = font.render(win_msg, True, WHITE)
-            screen.blit(win_surf, (WIDTH//2 - win_surf.get_width()//2, HEIGHT//2))
+            screen.blit(win_surf, (WIDTH//2 - win_surf.get_width()//2, HEIGHT//2 - 80))
 
+            mouse_pos = pygame.mouse.get_pos()
+
+            restart_hover = restart_btn.collidepoint(mouse_pos)
+            quit_hover = quit_btn.collidepoint(mouse_pos)
+            
+            # Restart Button
+            if restart_hover:
+                pygame.draw.rect(screen, WHITE, restart_btn)  # filled
+                restart_text = button_font.render("Restart", True, BLACK)
+            else:
+                pygame.draw.rect(screen, WHITE, restart_btn, 2)  # outline
+                restart_text = button_font.render("Restart", True, WHITE)
+
+            screen.blit(restart_text, (
+                restart_btn.x + restart_btn.width//2 - restart_text.get_width()//2,
+                restart_btn.y + restart_btn.height//2 - restart_text.get_height()//2
+            ))
+
+
+            # Quit Button
+            if quit_hover:
+                pygame.draw.rect(screen, WHITE, quit_btn)
+                quit_text = button_font.render("Quit", True, BLACK)
+            else:
+                pygame.draw.rect(screen, WHITE, quit_btn, 2)
+                quit_text = button_font.render("Quit", True, WHITE)
+
+            screen.blit(quit_text, (
+                quit_btn.x + quit_btn.width//2 - quit_text.get_width()//2,
+                quit_btn.y + quit_btn.height//2 - quit_text.get_height()//2
+            ))
         pygame.display.flip()
         clock.tick(FPS)
 

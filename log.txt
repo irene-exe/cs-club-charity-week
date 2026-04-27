@@ -1,1 +1,10 @@
 Student Login, Name, Points
+
+899545, N/A N/A, 75.0
+38434824, N/A N/A, 0
+344243, N/A N/A, 0
+23432423, N/A N/A, 0
+4234234, N/A N/A, 0
+34232, N/A N/A, 0
+3423, N/A N/A, 0
+3242342, N/A N/A, 0

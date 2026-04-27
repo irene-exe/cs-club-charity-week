@@ -33,7 +33,8 @@ class Launcher:
         self.games = [
             {"name": "CyberStrike", "folder": "cyberstrike", "file": "main"},
             {"name": "Rhythm 5000", "folder": "rhythm", "file": "main"},
-            {"name": "Classic Tetris", "folder": "tetris", "file": "main"}
+            {"name": "Classic Tetris", "folder": "tetris", "file": "main"},
+            {"name": "2P Pong", "folder": "2ppong", "file": "main"}
         ]
         self.current_idx = 0
 
