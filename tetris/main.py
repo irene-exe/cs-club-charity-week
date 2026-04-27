@@ -54,8 +54,11 @@ class Tetromino:
         self.is_fracture = random.random() < f_chance
         self.color = RED if self.is_fracture else random.choice([CYAN, MAGENTA])
         self.x, self.y = COLUMNS // 2 - len(shape[0]) // 2, 0
-    def rotate(self):
-        self.shape = [list(row) for row in zip(*self.shape[::-1])]
+    def rotate(self, right=True):
+        if right == True:
+            self.shape = [list(row) for row in zip(*self.shape[::-1])]
+        else:
+            self.shape = [list(row) for row in zip(*self.shape)][::-1]
 
 class TetrisGame:
     def __init__(self):
@@ -203,13 +206,13 @@ def main():
                     else: console_input += event.unicode
                 elif state == "TITLE" and event.key == pygame.K_SPACE: state = "PLAYING"
                 elif state == "PLAYING":
-                    if event.key == pygame.K_LEFT and game.valid_move(game.current_piece, -1, 0): game.current_piece.x -= 1
-                    if event.key == pygame.K_RIGHT and game.valid_move(game.current_piece, 1, 0): game.current_piece.x += 1
-                    if event.key == pygame.K_UP:
+                    if (event.key == pygame.K_LEFT or event.key == pygame.K_a) and game.valid_move(game.current_piece, -1, 0): game.current_piece.x -= 1
+                    if (event.key == pygame.K_RIGHT or event.key == pygame.K_d) and game.valid_move(game.current_piece, 1, 0): game.current_piece.x += 1
+                    if event.key == pygame.K_SPACE:
                         game.latency = max(0, game.latency - game.latency_reduction); game.score += game.pts_save
                         while game.valid_move(game.current_piece, 0, 1): game.current_piece.y += 1
                         game.lock_piece()
-                    if event.key == pygame.K_SPACE:
+                    if event.key == pygame.K_UP:
                         game.current_piece.rotate()
                         if not game.valid_move(game.current_piece, 0, 0): 
                             for _ in range(3): game.current_piece.rotate()
