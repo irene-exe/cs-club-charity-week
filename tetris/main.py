@@ -147,136 +147,142 @@ class TetrisGame:
             if self.valid_move(self.current_piece, 0, 1): self.current_piece.y += 1
             else: self.lock_piece()
             self.last_drop_time = now
-
+ 
 # --- 4. ENGINE ---
 game = TetrisGame(); state = "TITLE"
 show_console, console_input = False, ""
 admin_log = ["--- SYSTEM OVERRIDE ACTIVE ---", "USE '|' TO HARD REBOOT"]
+running = True
 down_pressed = False
-
-while True:
-    screen.fill(BLACK); now = pygame.time.get_ticks()
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT: pygame.quit(); sys.exit()
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_DOWN:
-                down_pressed = True
-            # HIDDEN HARD REBOOT
-            if event.unicode == "|": 
-                state = "TITLE"; game.__init__(); admin_log.append("HARD REBOOT EXECUTED")
-            
-            if event.key == pygame.K_BACKQUOTE: show_console = not show_console
-            elif show_console:
-                if event.key == pygame.K_RETURN:
-                    p = console_input.lower().split()
-                    if p:
-                        cmd = p[0]
-                        try:
-                            if cmd == "help": 
-                                admin_log.extend([
-                                    "spawn [0-100]  : Fracture chance %",
-                                    "speed [ms]     : Initial fall delay",
-                                    "rate [0.0-1.0] : Gravity decay per 5s",
-                                    "row_pts [val]  : Points per row",
-                                    "save_pts [val] : Points per hard drop",
-                                    "lat_inc [val]  : Passive heat gain",
-                                    "lat_dec [val]  : Heat removed on slam",
-                                    "fr_time [ms]   : Fracture lifetime"
-                                ])
-                            elif cmd == "spawn": game.fracture_chance = int(p[1])/100.0; admin_log.append(f"SPAWN: {p[1]}%")
-                            elif cmd == "speed": game.base_speed = float(p[1]); admin_log.append(f"SPEED: {p[1]}ms")
-                            elif cmd == "rate": game.speed_decay = float(p[1]); admin_log.append(f"RATE: {p[1]}")
-                            elif cmd == "row_pts": game.pts_row = float(p[1]); admin_log.append(f"ROW: {p[1]}pts")
-                            elif cmd == "save_pts": game.pts_save = float(p[1]); admin_log.append(f"SAVE: {p[1]}pts")
-                            elif cmd == "lat_inc": game.latency_gain = float(p[1]); admin_log.append(f"LAT+: {p[1]}")
-                            elif cmd == "lat_dec": game.latency_reduction = float(p[1]); admin_log.append(f"LAT-: {p[1]}")
-                            elif cmd == "fr_time": game.fracture_duration = int(p[1]); admin_log.append(f"FRAC: {p[1]}ms")
-                            else: admin_log.append(f"ERR: {cmd} NOT FOUND")
-                        except: admin_log.append("ERR: PARAM INVALID")
-                    console_input = ""
-                elif event.key == pygame.K_BACKSPACE: console_input = console_input[:-1]
-                else: console_input += event.unicode
-            elif state == "TITLE" and event.key == pygame.K_SPACE: state = "PLAYING"
-            elif state == "PLAYING":
-                if event.key == pygame.K_LEFT and game.valid_move(game.current_piece, -1, 0): game.current_piece.x -= 1
-                if event.key == pygame.K_RIGHT and game.valid_move(game.current_piece, 1, 0): game.current_piece.x += 1
-                if event.key == pygame.K_UP:
-                    game.latency = max(0, game.latency - game.latency_reduction); game.score += game.pts_save
-                    while game.valid_move(game.current_piece, 0, 1): game.current_piece.y += 1
-                    game.lock_piece()
-                if event.key == pygame.K_SPACE:
-                    game.current_piece.rotate()
-                    if not game.valid_move(game.current_piece, 0, 0): 
-                        for _ in range(3): game.current_piece.rotate()
-                        
-        if event.type == pygame.KEYUP:
+def main():
+    global state, running
+    global game, show_console, console_input, admin_log, down_pressed, WIDTH, HEIGHT, GRID_SIZE, COLUMNS, ROWS, GAME_WIDTH, GAME_HEIGHT, OFFSET_X, OFFSET_Y
+    global BLACK, WHITE, CYAN, MAGENTA, WHITE, RED, GRAY, DARK_BLUE, GRID_BLUE
+    global SHAPES, screen, clock, font_main, font_sub, console_font, restart_btn, quit_btn
+    while running:
+        screen.fill(BLACK); now = pygame.time.get_ticks()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_DOWN:
-                    down_pressed = False
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if state == "GAME_OVER":
-                if restart_btn.collidepoint(event.pos):
-                    game = TetrisGame()   # full reset
-                    state = "PLAYING"
+                    down_pressed = True
+                # HIDDEN HARD REBOOT
+                if event.unicode == "|": 
+                    state = "TITLE"; game.__init__(); admin_log.append("HARD REBOOT EXECUTED")
+                
+                if event.key == pygame.K_BACKQUOTE: show_console = not show_console
+                elif show_console:
+                    if event.key == pygame.K_RETURN:
+                        p = console_input.lower().split()
+                        if p:
+                            cmd = p[0]
+                            try:
+                                if cmd == "help": 
+                                    admin_log.extend([
+                                        "spawn [0-100]  : Fracture chance %",
+                                        "speed [ms]     : Initial fall delay",
+                                        "rate [0.0-1.0] : Gravity decay per 5s",
+                                        "row_pts [val]  : Points per row",
+                                        "save_pts [val] : Points per hard drop",
+                                        "lat_inc [val]  : Passive heat gain",
+                                        "lat_dec [val]  : Heat removed on slam",
+                                        "fr_time [ms]   : Fracture lifetime"
+                                    ])
+                                elif cmd == "spawn": game.fracture_chance = int(p[1])/100.0; admin_log.append(f"SPAWN: {p[1]}%")
+                                elif cmd == "speed": game.base_speed = float(p[1]); admin_log.append(f"SPEED: {p[1]}ms")
+                                elif cmd == "rate": game.speed_decay = float(p[1]); admin_log.append(f"RATE: {p[1]}")
+                                elif cmd == "row_pts": game.pts_row = float(p[1]); admin_log.append(f"ROW: {p[1]}pts")
+                                elif cmd == "save_pts": game.pts_save = float(p[1]); admin_log.append(f"SAVE: {p[1]}pts")
+                                elif cmd == "lat_inc": game.latency_gain = float(p[1]); admin_log.append(f"LAT+: {p[1]}")
+                                elif cmd == "lat_dec": game.latency_reduction = float(p[1]); admin_log.append(f"LAT-: {p[1]}")
+                                elif cmd == "fr_time": game.fracture_duration = int(p[1]); admin_log.append(f"FRAC: {p[1]}ms")
+                                else: admin_log.append(f"ERR: {cmd} NOT FOUND")
+                            except: admin_log.append("ERR: PARAM INVALID")
+                        console_input = ""
+                    elif event.key == pygame.K_BACKSPACE: console_input = console_input[:-1]
+                    else: console_input += event.unicode
+                elif state == "TITLE" and event.key == pygame.K_SPACE: state = "PLAYING"
+                elif state == "PLAYING":
+                    if event.key == pygame.K_LEFT and game.valid_move(game.current_piece, -1, 0): game.current_piece.x -= 1
+                    if event.key == pygame.K_RIGHT and game.valid_move(game.current_piece, 1, 0): game.current_piece.x += 1
+                    if event.key == pygame.K_UP:
+                        game.latency = max(0, game.latency - game.latency_reduction); game.score += game.pts_save
+                        while game.valid_move(game.current_piece, 0, 1): game.current_piece.y += 1
+                        game.lock_piece()
+                    if event.key == pygame.K_SPACE:
+                        game.current_piece.rotate()
+                        if not game.valid_move(game.current_piece, 0, 0): 
+                            for _ in range(3): game.current_piece.rotate()
+                            
+            if event.type == pygame.KEYUP:
+                    if event.key == pygame.K_DOWN:
+                        down_pressed = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if state == "GAME_OVER":
+                    if restart_btn.collidepoint(event.pos):
+                        game = TetrisGame()   # full reset
+                        state = "PLAYING"
 
-                if quit_btn.collidepoint(event.pos):
-                    pygame.quit()
-                    sys.exit()
-            
+                    if quit_btn.collidepoint(event.pos):
+                        running = False
+                        return round(game.score,2)
+                
 
-    if state == "TITLE":
-        t1 = font_main.render("TETRIS: NO HESITATION", True, CYAN)
-        t2 = font_sub.render("SUB_ROUTINE: DEEP_STATE", True, MAGENTA)
-        screen.blit(t1, (WIDTH//2 - t1.get_width()//2, HEIGHT//2 - 50))
-        if (now // 500) % 2:
-            t3 = font_sub.render("[ PRESS SPACE TO START ]", True, WHITE)
-            screen.blit(t3, (WIDTH//2 - t3.get_width()//2, HEIGHT//2 + 50))
-    elif state == "PLAYING":
-        if not show_console: game.update()
-        pygame.draw.rect(screen, DARK_BLUE, (OFFSET_X-5, OFFSET_Y-5, GAME_WIDTH+10, GAME_HEIGHT+10), 3)
-        for i, p_next in enumerate(game.queue):
-            for y, row in enumerate(p_next.shape):
+        if state == "TITLE":
+            t1 = font_main.render("TETRIS: NO HESITATION", True, CYAN)
+            t2 = font_sub.render("SUB_ROUTINE: DEEP_STATE", True, MAGENTA)
+            screen.blit(t1, (WIDTH//2 - t1.get_width()//2, HEIGHT//2 - 50))
+            if (now // 500) % 2:
+                t3 = font_sub.render("[ PRESS SPACE TO START ]", True, WHITE)
+                screen.blit(t3, (WIDTH//2 - t3.get_width()//2, HEIGHT//2 + 50))
+        elif state == "PLAYING":
+            if not show_console: game.update()
+            pygame.draw.rect(screen, DARK_BLUE, (OFFSET_X-5, OFFSET_Y-5, GAME_WIDTH+10, GAME_HEIGHT+10), 3)
+            for i, p_next in enumerate(game.queue):
+                for y, row in enumerate(p_next.shape):
+                    for x, cell in enumerate(row):
+                        if cell: draw_4d_block(screen, OFFSET_X+GAME_WIDTH+60+x*20, OFFSET_Y+400+i*80+y*20, 20, p_next.color, p_next.is_fracture, 0)
+            for y, row in enumerate(game.grid):
                 for x, cell in enumerate(row):
-                    if cell: draw_4d_block(screen, OFFSET_X+GAME_WIDTH+60+x*20, OFFSET_Y+400+i*80+y*20, 20, p_next.color, p_next.is_fracture, 0)
-        for y, row in enumerate(game.grid):
-            for x, cell in enumerate(row):
-                if cell: draw_4d_block(screen, OFFSET_X+x*GRID_SIZE, OFFSET_Y+y*GRID_SIZE, GRID_SIZE, cell["color"], cell["fracture"], game.fracture_timers.get((y,x),0))
-        p = game.current_piece
-        for y, row in enumerate(p.shape):
-            for x, cell in enumerate(row):
-                if cell: draw_4d_block(screen, OFFSET_X+(p.x+x)*GRID_SIZE, OFFSET_Y+(p.y+y)*GRID_SIZE, GRID_SIZE, p.color, p.is_fracture)
-        bar_x = OFFSET_X + GAME_WIDTH + 40
-        pygame.draw.rect(screen, DARK_BLUE, (bar_x, OFFSET_Y, 20, 300), 2)
-        f = (game.latency / 100) * 300; lc = RED if game.latency > 80 else CYAN
-        pygame.draw.rect(screen, lc, (bar_x, OFFSET_Y+300-f, 20, f))
-        screen.blit(font_sub.render(f"POINTS: {game.score:.1f}", True, WHITE), (OFFSET_X - 180, OFFSET_Y))
-        sw = (now - game.last_speed_bump > 4000); lvc = RED if sw and (now // 100) % 2 else MAGENTA
-        screen.blit(font_sub.render(f"LVL: {game.speed_level}", True, lvc), (OFFSET_X - 180, OFFSET_Y + 40))
-        if game.game_over: state = "GAME_OVER"
-    elif state == "GAME_OVER":
-        ov = font_main.render("SYSTEM FAILURE", True, RED)
-        sc = font_sub.render(f"FINAL POINTS: {game.score:.1f}", True, WHITE)
+                    if cell: draw_4d_block(screen, OFFSET_X+x*GRID_SIZE, OFFSET_Y+y*GRID_SIZE, GRID_SIZE, cell["color"], cell["fracture"], game.fracture_timers.get((y,x),0))
+            p = game.current_piece
+            for y, row in enumerate(p.shape):
+                for x, cell in enumerate(row):
+                    if cell: draw_4d_block(screen, OFFSET_X+(p.x+x)*GRID_SIZE, OFFSET_Y+(p.y+y)*GRID_SIZE, GRID_SIZE, p.color, p.is_fracture)
+            bar_x = OFFSET_X + GAME_WIDTH + 40
+            pygame.draw.rect(screen, DARK_BLUE, (bar_x, OFFSET_Y, 20, 300), 2)
+            f = (game.latency / 100) * 300; lc = RED if game.latency > 80 else CYAN
+            pygame.draw.rect(screen, lc, (bar_x, OFFSET_Y+300-f, 20, f))
+            screen.blit(font_sub.render(f"POINTS: {game.score:.1f}", True, WHITE), (OFFSET_X - 180, OFFSET_Y))
+            sw = (now - game.last_speed_bump > 4000); lvc = RED if sw and (now // 100) % 2 else MAGENTA
+            screen.blit(font_sub.render(f"LVL: {game.speed_level}", True, lvc), (OFFSET_X - 180, OFFSET_Y + 40))
+            if game.game_over: state = "GAME_OVER"
+        elif state == "GAME_OVER":
+            ov = font_main.render("SYSTEM FAILURE", True, RED)
+            sc = font_sub.render(f"FINAL POINTS: {game.score:.1f}", True, WHITE)
 
-        screen.blit(ov, (WIDTH//2 - ov.get_width()//2, HEIGHT//2 - 100))
-        screen.blit(sc, (WIDTH//2 - sc.get_width()//2, HEIGHT//2 - 40))
+            screen.blit(ov, (WIDTH//2 - ov.get_width()//2, HEIGHT//2 - 100))
+            screen.blit(sc, (WIDTH//2 - sc.get_width()//2, HEIGHT//2 - 40))
+            
+            mouse_pos = pygame.mouse.get_pos()
+
+            restart_color = (0, 200, 200) if restart_btn.collidepoint(mouse_pos) else CYAN
+            quit_color    = (200, 0, 0) if quit_btn.collidepoint(mouse_pos) else RED
+
+            # --- Restart Button ---
+            pygame.draw.rect(screen, restart_color, restart_btn, border_radius=8)
+            r_text = font_sub.render("RESTART", True, BLACK)
+            screen.blit(r_text, r_text.get_rect(center=restart_btn.center))
+
+            # --- Quit Button ---
+            pygame.draw.rect(screen, quit_color, quit_btn, border_radius=8)
+            q_text = font_sub.render("RECORD", True, BLACK)
+            screen.blit(q_text, q_text.get_rect(center=quit_btn.center))
+        if show_console:
+            s = pygame.Surface((WIDTH, 260), pygame.SRCALPHA); s.fill((2, 2, 8, 245)); screen.blit(s, (0, HEIGHT-260))
+            pygame.draw.line(screen, MAGENTA, (0, HEIGHT-260), (WIDTH, HEIGHT-260), 2)
+            for i, log in enumerate(admin_log[-10:]): screen.blit(console_font.render(f"> {log}", True, MAGENTA), (20, HEIGHT-245 + i*20))
+            screen.blit(console_font.render(f"root@system:~# {console_input}|", True, WHITE), (20, HEIGHT-35))
+
+        pygame.display.flip(); clock.tick(60)
         
-        mouse_pos = pygame.mouse.get_pos()
-
-        restart_color = (0, 200, 200) if restart_btn.collidepoint(mouse_pos) else CYAN
-        quit_color    = (200, 0, 0) if quit_btn.collidepoint(mouse_pos) else RED
-
-        # --- Restart Button ---
-        pygame.draw.rect(screen, restart_color, restart_btn, border_radius=8)
-        r_text = font_sub.render("RESTART", True, BLACK)
-        screen.blit(r_text, r_text.get_rect(center=restart_btn.center))
-
-        # --- Quit Button ---
-        pygame.draw.rect(screen, quit_color, quit_btn, border_radius=8)
-        q_text = font_sub.render("QUIT", True, BLACK)
-        screen.blit(q_text, q_text.get_rect(center=quit_btn.center))
-    if show_console:
-        s = pygame.Surface((WIDTH, 260), pygame.SRCALPHA); s.fill((2, 2, 8, 245)); screen.blit(s, (0, HEIGHT-260))
-        pygame.draw.line(screen, MAGENTA, (0, HEIGHT-260), (WIDTH, HEIGHT-260), 2)
-        for i, log in enumerate(admin_log[-10:]): screen.blit(console_font.render(f"> {log}", True, MAGENTA), (20, HEIGHT-245 + i*20))
-        screen.blit(console_font.render(f"root@system:~# {console_input}|", True, WHITE), (20, HEIGHT-35))
-
-    pygame.display.flip(); clock.tick(60)

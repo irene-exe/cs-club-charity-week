@@ -115,7 +115,7 @@ main_menu_buttons = [
 
 end_game_buttons = [
     Button(cw-70, ch - 40, 150, 50, "RESTART"),
-    Button(cw-70, ch + 40, 150, 50, "BACK")
+    Button(cw-70, ch + 40, 150, 50, "RECORD")
 ]
 
 '''
@@ -445,7 +445,6 @@ def display_msg():
 
 def buttonA(key_pressed):
     global display_text, display_timer, tiles, score, lives, game_state, menu_selected, menu_animation_timer, glow_timers
-    
     if selected_quad is not None:
         istile = False
         for tile in tiles:
@@ -553,6 +552,7 @@ def reset_game():
     global tiles, score, lives, spawn_counter, timeeeee, heart_hit_timers, display_timer, display_text
     global menu_animation_timer, menu_selected, glow_timers
     
+    
     tiles = []
     score = 0
     lives = 3
@@ -607,97 +607,99 @@ heart_hit_timers = [0, 0, 0]  # one per heart
 clock = pygame.time.Clock()
 FPS = 60
 
-while running:
-    clock.tick(FPS)
-    window.fill(black)
-    
-    # Handle events
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+def main():
+    global score, game_state, tiles, feedback_text, feedback_timer, hit_count, selected_quad, spawn_counter, menu_selected, menu_animation_timer
+    global main_menu_buttons, end_game_buttons, display_timer, display_text, running, heart_filled, heart_outline, lives, timeeeee, heart_hit_timers, clock, FPS
+    while running:
+        clock.tick(FPS)
+        window.fill(black)
         
-        if event.type == pygame.KEYDOWN:
-            if game_state == "menu":
-                if event.key == pygame.K_w or event.key == pygame.K_UP:
-                    menu_selected = (menu_selected - 1) % len(main_menu_buttons)
-                elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
-                    menu_selected = (menu_selected + 1) % len(main_menu_buttons)
-                elif event.key == pygame.K_SPACE or event.key == pygame.K_RETURN:
-                    if menu_selected == 0:  # PLAY
-                        game_state = "playing"
-                        reset_game()
-                    elif menu_selected == 1:  # QUIT
-                        running = False
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
             
-            elif game_state == "end_game":
-                if event.key == pygame.K_w or event.key == pygame.K_UP:
-                    menu_selected = (menu_selected - 1) % len(end_game_buttons)
-                elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
-                    menu_selected = (menu_selected + 1) % len(end_game_buttons)
-                elif event.key == pygame.K_SPACE or event.key == pygame.K_RETURN:
-                    if menu_selected == 0:  # RESTART
-                        game_state = "playing"
-                        reset_game()
-                    elif menu_selected == 1:  # MAIN MENU
-                        game_state = "menu"
-                        menu_selected = 0
-                        menu_animation_timer = 0
+            if event.type == pygame.KEYDOWN:
+                if game_state == "menu":
+                    if event.key == pygame.K_w or event.key == pygame.K_UP:
+                        menu_selected = (menu_selected - 1) % len(main_menu_buttons)
+                    elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
+                        menu_selected = (menu_selected + 1) % len(main_menu_buttons)
+                    elif event.key == pygame.K_SPACE or event.key == pygame.K_RETURN:
+                        if menu_selected == 0:  # PLAY
+                            game_state = "playing"
+                            reset_game()
+                        elif menu_selected == 1:  # QUIT
+                            running = False
+                
+                elif game_state == "end_game":
+                    if event.key == pygame.K_w or event.key == pygame.K_UP:
+                        menu_selected = (menu_selected - 1) % len(end_game_buttons)
+                    elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
+                        menu_selected = (menu_selected + 1) % len(end_game_buttons)
+                    elif event.key == pygame.K_SPACE or event.key == pygame.K_RETURN:
+                        if menu_selected == 0:  # RESTART
+                            game_state = "playing"
+                            reset_game()
+                        elif menu_selected == 1:
+                            running = False
+                            return score
+                
+                elif game_state == "playing":
+                    if event.key == pygame.K_j:
+                        buttonA(pygame.K_j)
+                    elif event.key == pygame.K_k:
+                        buttonA(pygame.K_k)
+        
+        # Draw based on game state
+        if game_state == "menu":
+            draw_main_menu()
+        
+        elif game_state == "playing":
+            font = pygame.font.Font(None, 28)
+            text_surface = font.render("Score: " + str(score), True, white)
+            text_rect = text_surface.get_rect(center=(430, 20))
+            window.blit(text_surface, text_rect)
             
-            elif game_state == "playing":
-                if event.key == pygame.K_j:
-                    buttonA(pygame.K_j)
-                elif event.key == pygame.K_k:
-                    buttonA(pygame.K_k)
-    
-    # Draw based on game state
-    if game_state == "menu":
-        draw_main_menu()
-    
-    elif game_state == "playing":
-        font = pygame.font.Font(None, 28)
-        text_surface = font.render("Score: " + str(score), True, white)
-        text_rect = text_surface.get_rect(center=(430, 20))
-        window.blit(text_surface, text_rect)
+            draw_hearts()
+            
+            selected_quad = get_selected_quadrant()
+            
+            # Update glow timers
+            for i in range(8):
+                if glow_timers[i] > 0:
+                    glow_timers[i] -= 1
+            
+            draw_octagon_ring(window, 50, 200, selected_quad, glow_timers)
+            octagon(window, 50, white)
+            octagon(window, 200, white, 2)
+            
+            # Spawn tiles every 10 frames
+            spawn_counter += 1
+            if spawn_counter >= timeeeee:
+                tiles.append(spawn_tile(50))
+                spawn_counter = 0
+                timeeeee *= 0.97
+                timeeeee = max(18, timeeeee)
+            
+            # Update tiles
+            tiles = update_tiles(tiles, 200, speed=2)
+            
+            # Draw tiles
+            draw_tiles(window, tiles, min_line_length=10, max_line_length=50, inner_radius=50, outer_radius=200)
+            
+            if display_text != "":
+                display_msg()
+            
+            # Check if game over
+            if lives < 0:
+                game_state = "end_game"
+                menu_selected = 0
+                menu_animation_timer = 0
         
-        draw_hearts()
+        elif game_state == "end_game":
+            draw_end_game_menu()
         
-        selected_quad = get_selected_quadrant()
-        
-        # Update glow timers
-        for i in range(8):
-            if glow_timers[i] > 0:
-                glow_timers[i] -= 1
-        
-        draw_octagon_ring(window, 50, 200, selected_quad, glow_timers)
-        octagon(window, 50, white)
-        octagon(window, 200, white, 2)
-        
-        # Spawn tiles every 10 frames
-        spawn_counter += 1
-        if spawn_counter >= timeeeee:
-            tiles.append(spawn_tile(50))
-            spawn_counter = 0
-            timeeeee *= 0.97
-            timeeeee = max(18, timeeeee)
-        
-        # Update tiles
-        tiles = update_tiles(tiles, 200, speed=2)
-        
-        # Draw tiles
-        draw_tiles(window, tiles, min_line_length=10, max_line_length=50, inner_radius=50, outer_radius=200)
-        
-        if display_text != "":
-            display_msg()
-        
-        # Check if game over
-        if lives < 0:
-            game_state = "end_game"
-            menu_selected = 0
-            menu_animation_timer = 0
-    
-    elif game_state == "end_game":
-        draw_end_game_menu()
-    
-    pygame.display.update()
+        pygame.display.update()
 
-pygame.quit()
+    pygame.quit()
