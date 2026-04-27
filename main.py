@@ -66,11 +66,31 @@ class Launcher:
                 # Format: Student Login, Name, Points
                 f.write(f"{sn}, {full_name}, 0\n")
 
-    def draw_button(self, text, rect, color):
-        pygame.draw.rect(screen, color, rect, border_radius=8)
-        txt_surface = font.render(text, True, WHITE)
-        txt_rect = txt_surface.get_rect(center=rect.center)
+    def draw_button(self, text, rect, base_color):
+        mouse_pos = pygame.mouse.get_pos()
+        hovered = rect.collidepoint(mouse_pos)
+
+        # --- Scale effect ---
+        scale = 1.0 + (0.08 if hovered else 0)
+        new_w = int(rect.width * scale)
+        new_h = int(rect.height * scale)
+
+        scaled_rect = pygame.Rect(0, 0, new_w, new_h)
+        scaled_rect.center = rect.center  # keep centered
+
+        # --- Color change ---
+        color = DARK_GRAY if hovered else base_color
+
+        # Draw button
+        pygame.draw.rect(screen, color, scaled_rect, border_radius=10)
+
+        # Text (invert on hover)
+        text_color = BLACK if hovered else WHITE
+        txt_surface = font.render(text, True, text_color)
+        txt_rect = txt_surface.get_rect(center=scaled_rect.center)
         screen.blit(txt_surface, txt_rect)
+
+        return scaled_rect  # important if you want accurate click detection
         
     def record_score(self, score=0):
         print("FUN")
