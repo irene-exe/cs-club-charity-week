@@ -91,7 +91,31 @@ class Launcher:
         screen.blit(txt_surface, txt_rect)
 
         return scaled_rect  # important if you want accurate click detection
-        
+    
+    def get_user_score(self):
+        filename = "log.txt"
+        student_id = self.fields["Student Number"].strip()
+
+        if not os.path.exists(filename):
+            return 0
+
+        with open(filename, "r") as f:
+            lines = f.readlines()
+
+        for line in lines[1:]:  # skip header
+            parts = line.strip().split(", ")
+            if len(parts) >= 3:
+                current_id = parts[0]
+                current_points = parts[2]
+
+                if current_id == student_id:
+                    try:
+                        return float(current_points)
+                    except:
+                        return 0
+
+        return 0
+
     def record_score(self, score=0):
         print("FUN")
         filename = "log.txt"
@@ -260,9 +284,14 @@ class Launcher:
                 display_name = self.fields["First Name (Optional)"].strip() or f"ID: {self.fields['Student Number']}"
                 welcome = font.render(f"Welcome, {display_name}", True, DARK_GRAY)
                 screen.blit(welcome, (20, 20))
+                
+                score = self.get_user_score()
+                score_text = font.render(f"Score: {score}", True, BLUE)
+                screen.blit(score_text, (20, 60))
 
                 title = title_font.render(self.games[self.current_idx]["name"], True, BLACK)
                 screen.blit(title, (WIDTH//2 - title.get_width()//2, 250))
+                
                 
                 self.draw_button("<", pygame.Rect(50, 275, 50, 50), BLUE)
                 self.draw_button(">", pygame.Rect(700, 275, 50, 50), BLUE)
