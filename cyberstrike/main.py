@@ -314,7 +314,7 @@ def main():
                     if e[2] == 3 and current_ticks - e[4] < 3000: continue
                     if math.hypot(b[0]-e[0], b[1]-e[1]) < 25:
                         rem_b.append(b); e[3] -= 1
-                        if e[3] <= 0 and e not in rem_e: rem_e.append(e); score += 1
+                        if e[3] <= 0 and e not in rem_e: rem_e.append(e); score += (3)
             
             bullets = [b for b in bullets if b not in rem_b and b[1] > -20]
             enemies = [e for e in enemies if e not in rem_e and e[1] < HEIGHT + 50]
