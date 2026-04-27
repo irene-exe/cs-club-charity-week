@@ -27,6 +27,8 @@ clock = pygame.time.Clock()
 font_main = pygame.font.SysFont("monospace", 45, bold=True)
 font_sub = pygame.font.SysFont("monospace", 22, bold=True)
 console_font = pygame.font.SysFont("monospace", 14)
+restart_btn = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 + 60, 240, 50)
+quit_btn    = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 + 130, 240, 50)
 
 # --- 2. RENDERER ---
 def draw_4d_block(surface, x, y, size, color, is_fracture=False, expiry_time=0):
@@ -63,10 +65,10 @@ class TetrisGame:
         self.fracture_chance = 0.20
         self.fracture_duration = 7000
         self.base_speed = 900.0 
-        self.speed_decay = 0.85
+        self.speed_decay = 0.8
         self.pts_row = 4.0
         self.pts_save = 0.2
-        self.latency_gain = 0.06
+        self.latency_gain = 0.03
         self.latency_reduction = 12.0
         
         self.generate_junk()
@@ -133,9 +135,14 @@ class TetrisGame:
         for pos in [p for p, t in self.fracture_timers.items() if now > t]:
             self.grid[pos[0]][pos[1]] = None; del self.fracture_timers[pos]
         if now - self.last_speed_bump > 5000:
-            self.base_speed *= self.speed_decay; self.speed_level += 1; self.last_speed_bump = now
+            self.base_speed -= 50; self.speed_level += 1; self.last_speed_bump = now
         self.latency = min(100, self.latency + self.latency_gain)
-        delay = max(25, self.base_speed - (self.latency * 5))
+        delay = self.base_speed - (self.latency * 3)
+        delay += (self.latency ** 2) * 0.02
+
+        # soft drop (↓ key)
+        if down_pressed:
+            delay *= 0.2   # 5x faster (tune this)
         if now - self.last_drop_time > delay:
             if self.valid_move(self.current_piece, 0, 1): self.current_piece.y += 1
             else: self.lock_piece()
@@ -145,12 +152,15 @@ class TetrisGame:
 game = TetrisGame(); state = "TITLE"
 show_console, console_input = False, ""
 admin_log = ["--- SYSTEM OVERRIDE ACTIVE ---", "USE '|' TO HARD REBOOT"]
+down_pressed = False
 
 while True:
     screen.fill(BLACK); now = pygame.time.get_ticks()
     for event in pygame.event.get():
         if event.type == pygame.QUIT: pygame.quit(); sys.exit()
         if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_DOWN:
+                down_pressed = True
             # HIDDEN HARD REBOOT
             if event.unicode == "|": 
                 state = "TITLE"; game.__init__(); admin_log.append("HARD REBOOT EXECUTED")
@@ -198,6 +208,20 @@ while True:
                     game.current_piece.rotate()
                     if not game.valid_move(game.current_piece, 0, 0): 
                         for _ in range(3): game.current_piece.rotate()
+                        
+        if event.type == pygame.KEYUP:
+                if event.key == pygame.K_DOWN:
+                    down_pressed = False
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if state == "GAME_OVER":
+                if restart_btn.collidepoint(event.pos):
+                    game = TetrisGame()   # full reset
+                    state = "PLAYING"
+
+                if quit_btn.collidepoint(event.pos):
+                    pygame.quit()
+                    sys.exit()
+            
 
     if state == "TITLE":
         t1 = font_main.render("TETRIS: NO HESITATION", True, CYAN)
@@ -229,9 +253,26 @@ while True:
         screen.blit(font_sub.render(f"LVL: {game.speed_level}", True, lvc), (OFFSET_X - 180, OFFSET_Y + 40))
         if game.game_over: state = "GAME_OVER"
     elif state == "GAME_OVER":
-        ov = font_main.render("SYSTEM FAILURE", True, RED); sc = font_sub.render(f"FINAL POINTS: {game.score:.1f}", True, WHITE)
-        screen.blit(ov, (WIDTH//2 - ov.get_width()//2, HEIGHT//2 - 60)); screen.blit(sc, (WIDTH//2 - sc.get_width()//2, HEIGHT//2))
+        ov = font_main.render("SYSTEM FAILURE", True, RED)
+        sc = font_sub.render(f"FINAL POINTS: {game.score:.1f}", True, WHITE)
 
+        screen.blit(ov, (WIDTH//2 - ov.get_width()//2, HEIGHT//2 - 100))
+        screen.blit(sc, (WIDTH//2 - sc.get_width()//2, HEIGHT//2 - 40))
+        
+        mouse_pos = pygame.mouse.get_pos()
+
+        restart_color = (0, 200, 200) if restart_btn.collidepoint(mouse_pos) else CYAN
+        quit_color    = (200, 0, 0) if quit_btn.collidepoint(mouse_pos) else RED
+
+        # --- Restart Button ---
+        pygame.draw.rect(screen, restart_color, restart_btn, border_radius=8)
+        r_text = font_sub.render("RESTART", True, BLACK)
+        screen.blit(r_text, r_text.get_rect(center=restart_btn.center))
+
+        # --- Quit Button ---
+        pygame.draw.rect(screen, quit_color, quit_btn, border_radius=8)
+        q_text = font_sub.render("QUIT", True, BLACK)
+        screen.blit(q_text, q_text.get_rect(center=quit_btn.center))
     if show_console:
         s = pygame.Surface((WIDTH, 260), pygame.SRCALPHA); s.fill((2, 2, 8, 245)); screen.blit(s, (0, HEIGHT-260))
         pygame.draw.line(screen, MAGENTA, (0, HEIGHT-260), (WIDTH, HEIGHT-260), 2)
