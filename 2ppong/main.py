@@ -2,6 +2,13 @@ import pygame
 import sys
 import random
 import numpy as np
+import threading
+import time
+
+try:
+    import serial
+except ImportError:
+    serial = None
 
 # 1. Setup Constants
 WIDTH, HEIGHT = 1000, 500
@@ -19,6 +26,55 @@ MAX_SPEED = 16
 MAX_Y_SPEED = 8
 ACCEL = 1.4
 WINNING_SCORE = 1
+
+CONTROLLER_PORT = 'COM3'
+CONTROLLER_BAUD = 115200
+PLAYER1_UP_THRESHOLD = 300
+PLAYER1_DOWN_THRESHOLD = 700
+PLAYER2_UP_THRESHOLD = 300
+PLAYER2_DOWN_THRESHOLD = 700
+
+controller_state = {
+    "J1X": 512,
+    "J1Y": 512,
+    "J1SW": 1,
+    "J2X": 512,
+    "J2Y": 512,
+    "J2SW": 1,
+    "B1": 1,
+    "B2": 1,
+    "B3": 1,
+}
+controller_stop_event = threading.Event()
+
+
+def read_arduino_controller():
+    if serial is None:
+        return
+
+    while not controller_stop_event.is_set():
+        try:
+            with serial.Serial(CONTROLLER_PORT, CONTROLLER_BAUD, timeout=1) as ser:
+                while not controller_stop_event.is_set():
+                    raw = ser.readline()
+                    if not raw:
+                        continue
+                    try:
+                        line = raw.decode('utf-8').strip()
+                    except Exception:
+                        continue
+                    parts = line.split(',')
+                    for p in parts:
+                        if '=' in p:
+                            key, value = p.split('=', 1)
+                            if key in controller_state:
+                                try:
+                                    controller_state[key] = int(value)
+                                except ValueError:
+                                    pass
+        except Exception:
+            time.sleep(1)
+
 
 def main():
     pygame.init()
@@ -63,11 +119,14 @@ def main():
     reset_timer = 180 
     is_initial_start = True
 
+    if serial is not None:
+        threading.Thread(target=read_arduino_controller, daemon=True).start()
 
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                controller_stop_event.set()
                 pygame.quit()
                 sys.exit()
 
@@ -79,10 +138,21 @@ def main():
 
         # 1. Paddle Movement (Always active)
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_w] and player1.top > 0: player1.y -= player_speed
-        if keys[pygame.K_s] and player1.bottom < HEIGHT: player1.y += player_speed
-        if keys[pygame.K_UP] and player2.top > 0: player2.y -= player_speed
-        if keys[pygame.K_DOWN] and player2.bottom < HEIGHT: player2.y += player_speed
+        ctrl_j1y = controller_state.get("J1Y", 512)
+        ctrl_j2y = controller_state.get("J2Y", 512)
+        controller_j1_up = ctrl_j1y < PLAYER1_UP_THRESHOLD
+        controller_j1_down = ctrl_j1y > PLAYER1_DOWN_THRESHOLD
+        controller_j2_up = ctrl_j2y < PLAYER2_UP_THRESHOLD
+        controller_j2_down = ctrl_j2y > PLAYER2_DOWN_THRESHOLD
+
+        if (keys[pygame.K_w] or controller_j1_up) and player1.top > 0:
+            player1.y -= player_speed
+        if (keys[pygame.K_s] or controller_j1_down) and player1.bottom < HEIGHT:
+            player1.y += player_speed
+        if (keys[pygame.K_UP] or controller_j2_up) and player2.top > 0:
+            player2.y -= player_speed
+        if (keys[pygame.K_DOWN] or controller_j2_down) and player2.bottom < HEIGHT:
+            player2.y += player_speed
 
         if not game_over:
             if reset_timer > 0:
