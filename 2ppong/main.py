@@ -134,7 +134,7 @@ def main():
                 if restart_btn.collidepoint(event.pos):
                     reset_game()
                 elif quit_btn.collidepoint(event.pos):
-                    return 75
+                    return 100
 
         # 1. Paddle Movement (Always active)
         keys = pygame.key.get_pressed()

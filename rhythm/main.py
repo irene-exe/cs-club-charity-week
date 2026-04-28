@@ -460,11 +460,11 @@ def buttonA(key_pressed):
                     display_text = "Perfect!"
                     display_timer = 0
                 elif (dist>0.7):
-                    score += 5
+                    score += 6
                     display_text = "Good"
                     display_timer = 0
                 elif (dist>0.4):
-                    score += 1
+                    score += 3
                     display_text = "Ok"
                     display_timer = 0
                 else:
