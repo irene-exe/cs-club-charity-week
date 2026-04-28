@@ -263,7 +263,7 @@ def main():
                     if quit_btn.collidepoint(event.pos):
                         running = False
                         print(score)
-                        return score
+                        return round(score, 2)
 
         if game_state == "START_MENU":
             draw_background_grid(0.5)
@@ -388,7 +388,7 @@ def main():
                     if e[2] == 3 and current_ticks - e[4] < 3000: continue
                     if math.hypot(b[0]-e[0], b[1]-e[1]) < 25:
                         rem_b.append(b); e[3] -= 1
-                        if e[3] <= 0 and e not in rem_e: rem_e.append(e); score += (3)
+                        if e[3] <= 0 and e not in rem_e: rem_e.append(e); score += round(5 + (clock.get_time() / 100), 2)
             
             bullets = [b for b in bullets if b not in rem_b and b[1] > -20]
             enemies = [e for e in enemies if e not in rem_e and e[1] < HEIGHT + 50]
@@ -414,7 +414,7 @@ def main():
                     img = [s_core, s_zigzag, s_pointer][e[2]]
                     if img: screen.blit(img, (ex-17, ey-17))
 
-            screen.blit(font.render(f"DATA: {score}", True, YELLOW), (20, 20))
+            screen.blit(font.render(f"DATA: {round(score,2)}", True, YELLOW), (20, 20))
             link_color = RED if (stability < 40 or is_overload) else CYAN
             screen.blit(font.render(f"LINK: {int(stability)}%", True, link_color), (20, 55))
             
@@ -429,7 +429,7 @@ def main():
             draw_background_grid(0.1); draw_glitch(title_img, 0.5, alpha=150)
             msg = large_font.render("CONNECTION LOST", True, RED)
             screen.blit(msg, msg.get_rect(center=(WIDTH//2, HEIGHT//2 - 50)))
-            screen.blit(font.render(f"FINAL DATA: {score}", True, YELLOW), (WIDTH//2-80, HEIGHT//2+20))
+            screen.blit(font.render(f"FINAL DATA: {round(score,2)}", True, YELLOW), (WIDTH//2-80, HEIGHT//2+20))
             
             mouse_pos = pygame.mouse.get_pos()
 
